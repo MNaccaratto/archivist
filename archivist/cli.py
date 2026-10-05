@@ -1,4 +1,5 @@
 """Command-line interface."""
+
 from __future__ import annotations
 
 import argparse
@@ -27,9 +28,13 @@ def check_root(root: Path) -> None:
     if not root.is_dir():
         raise SystemExit(f"error: {root} is not a folder")
     if root == Path.home() or root.parent == root:
-        raise SystemExit("error: refusing to organize your home folder or a drive root. Pick a specific folder.")
+        raise SystemExit(
+            "error: refusing to organize your home folder or a drive root. Pick a specific folder."
+        )
     if (root / ".git").exists():
-        raise SystemExit("error: that folder is a git repository. Refusing to reorganize a code project.")
+        raise SystemExit(
+            "error: that folder is a git repository. Refusing to reorganize a code project."
+        )
 
 
 def cmd_organize(args) -> int:
@@ -42,32 +47,54 @@ def cmd_organize(args) -> int:
     root = Path(args.path).expanduser().resolve()
     check_root(root)
 
+    # Resolve the external destination if provided
+    dest_base = Path(args.dest).expanduser().resolve() if args.dest else None
+    if dest_base:
+        dest_base.mkdir(parents=True, exist_ok=True)
+
     files, skipped = scan(root, cfg, recursive=args.recursive)
-    moves = plan_moves(files, root, cfg)
+    moves = plan_moves(files, root, cfg, dest_base=dest_base)
 
     if not moves:
         print(f"Nothing to move in {root}.")
     else:
         groups = defaultdict(list)
         for m in moves:
-            groups[m.dest.parent.relative_to(root).as_posix()].append(m)
-        print(f"{'Moving' if args.apply else 'Would move'} {len(moves)} file(s) in {root}\n")
+            # Calculate the display path relative to the new destination
+            display_base = dest_base if dest_base else root
+            groups[m.dest.parent.relative_to(display_base).as_posix()].append(m)
+
+        print(
+            f"{'Moving' if args.apply else 'Would move'} {len(moves)} file(s) from {root}"
+        )
+        if dest_base:
+            print(f"Target destination: {dest_base}\n")
+
         for folder in sorted(groups):
             items = groups[folder]
-            print(f"  {folder}/  ({len(items)} file(s), {human(sum(i.size for i in items))})")
+            print(
+                f"  {folder}/  ({len(items)} file(s), {human(sum(i.size for i in items))})"
+            )
             shown = items if args.verbose else items[:SHOW_PER_FOLDER]
             for m in shown:
                 print(f"      {m.src.name}")
             if len(shown) < len(items):
-                print(f"      ... and {len(items) - len(shown)} more (use --verbose to list all)")
+                print(
+                    f"      ... and {len(items) - len(shown)} more (use --verbose to list all)"
+                )
 
     if skipped:
-        print("\nLeft alone: " + ", ".join(f"{n} {why}" for why, n in sorted(skipped.items())))
+        print(
+            "\nLeft alone: "
+            + ", ".join(f"{n} {why}" for why, n in sorted(skipped.items()))
+        )
 
     if not moves:
         return 0
     if not args.apply:
-        print("\nDry run, nothing was moved. Re-run with --apply to do it. Undo anytime with: archivist undo")
+        print(
+            "\nDry run, nothing was moved. Re-run with --apply to do it. Undo anytime with: archivist undo"
+        )
         return 0
 
     done, errors = apply_moves(moves, root)
@@ -90,18 +117,40 @@ def cmd_undo(_args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="archivist", description="Safely sort messy folders. Dry run by default.")
+    p = argparse.ArgumentParser(
+        prog="archivist", description="Safely sort messy folders. Dry run by default."
+    )
     p.add_argument("--version", action="version", version=f"archivist {__version__}")
     sub = p.add_subparsers(dest="command", required=True)
 
     o = sub.add_parser("organize", help="sort a folder (defaults to ~/Downloads)")
     o.add_argument("path", nargs="?", default=str(Path.home() / "Downloads"))
-    o.add_argument("--apply", action="store_true", help="actually move files (otherwise preview only)")
-    o.add_argument("--recursive", action="store_true",
-                   help="also pull files out of subfolders (flattens them into category folders)")
-    o.add_argument("--group-by", choices=["none", "year", "month"], help="add date subfolders")
-    o.add_argument("--min-age", type=float, metavar="MINUTES", help="skip files modified more recently than this")
-    o.add_argument("--config", help="path to a config.json (default: ~/.archivist/config.json)")
+    o.add_argument(
+        "--dest",
+        help="route files to a different base directory instead of sorting them locally",
+    )
+    o.add_argument(
+        "--apply",
+        action="store_true",
+        help="actually move files (otherwise preview only)",
+    )
+    o.add_argument(
+        "--recursive",
+        action="store_true",
+        help="also pull files out of subfolders (flattens them into category folders)",
+    )
+    o.add_argument(
+        "--group-by", choices=["none", "year", "month"], help="add date subfolders"
+    )
+    o.add_argument(
+        "--min-age",
+        type=float,
+        metavar="MINUTES",
+        help="skip files touched more recently than this",
+    )
+    o.add_argument(
+        "--config", help="path to a config.json (default: ~/.archivist/config.json)"
+    )
     o.add_argument("--verbose", "-v", action="store_true", help="list every file")
     o.set_defaults(func=cmd_organize)
 

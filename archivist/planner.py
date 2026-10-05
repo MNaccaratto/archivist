@@ -1,4 +1,5 @@
 """Pure logic: decide where each file should go. No filesystem access."""
+
 from __future__ import annotations
 
 import re
@@ -36,8 +37,11 @@ def classify(name: str, cfg: dict):
     return cfg["other_folder"], "unknown type"
 
 
-def plan_moves(files, root: Path, cfg: dict) -> list:
+def plan_moves(files, root: Path, cfg: dict, dest_base: Path | None = None) -> list:
     moves = []
+    # If no custom destination is provided, organize them inside the root folder
+    base = dest_base if dest_base else root
+
     for f in files:
         folder, reason = classify(f.name, cfg)
         if folder is None:
@@ -48,7 +52,8 @@ def plan_moves(files, root: Path, cfg: dict) -> list:
             parts.append(time.strftime("%Y", stamp))
         elif cfg["group_by"] == "month":
             parts.append(time.strftime("%Y-%m", stamp))
-        dest = root.joinpath(*parts, f.name)
+
+        dest = base.joinpath(*parts, f.name)
         if dest == f.path:
             continue  # already where it belongs
         moves.append(Move(f.path, dest, reason, f.size))
