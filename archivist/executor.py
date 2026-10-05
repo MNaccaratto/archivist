@@ -1,4 +1,5 @@
 """Perform moves, record history, and undo."""
+
 from __future__ import annotations
 
 import json
@@ -25,16 +26,21 @@ def unique_path(dest: Path) -> Path:
         i += 1
 
 
-def _write_history(root: Path, done: list) -> Path:
+def _write_history(root: Path, done: list, is_copy: bool) -> Path:
     history_dir().mkdir(parents=True, exist_ok=True)
     path = history_dir() / f"{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.json"
-    record = {"created": datetime.now().isoformat(timespec="seconds"), "root": str(root), "moves": done}
+    record = {
+        "created": datetime.now().isoformat(timespec="seconds"),
+        "root": str(root),
+        "action": "copy" if is_copy else "move",
+        "moves": done,
+    }
     path.write_text(json.dumps(record, indent=2), encoding="utf-8")
     return path
 
 
-def apply_moves(moves, root: Path):
-    """Move files. Returns (done, errors). History is saved even if interrupted."""
+def apply_moves(moves, root: Path, is_copy: bool = False):
+    """Move or copy files. Returns (done, errors). History is saved even if interrupted."""
     done: list = []
     errors: list = []
     try:
@@ -42,13 +48,16 @@ def apply_moves(moves, root: Path):
             try:
                 dest = unique_path(m.dest)
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(m.src), str(dest))
+                if is_copy:
+                    shutil.copy2(str(m.src), str(dest))
+                else:
+                    shutil.move(str(m.src), str(dest))
                 done.append({"from": str(m.src), "to": str(dest)})
             except OSError as e:
                 errors.append(f"{m.src.name}: {e}")
     finally:
         if done:
-            _write_history(root, done)
+            _write_history(root, done, is_copy)
     return done, errors
 
 
@@ -70,19 +79,31 @@ def undo_last():
     latest = runs[-1]
     record = json.loads(latest.read_text(encoding="utf-8"))
     root = Path(record["root"])
+    action = record.get("action", "move")
     restored = 0
     skipped: list = []
+
     for mv in reversed(record["moves"]):
         moved, original = Path(mv["to"]), Path(mv["from"])
+
         if not moved.exists():
             skipped.append(f"{moved.name}: no longer at {moved.parent}")
+        elif action == "copy":
+            # For a copy, undo just means deleting the destination file
+            moved.unlink()
+            _prune_empty_parents(moved, root)
+            restored += 1
         elif original.exists():
-            skipped.append(f"{original.name}: something already exists at the original location")
+            skipped.append(
+                f"{original.name}: something already exists at the original location"
+            )
         else:
+            # For a move, we move it back
             original.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(moved), str(original))
             _prune_empty_parents(moved, root)
             restored += 1
+
     done_dir = history_dir() / "undone"
     done_dir.mkdir(exist_ok=True)
     latest.rename(done_dir / latest.name)

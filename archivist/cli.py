@@ -64,9 +64,11 @@ def cmd_organize(args) -> int:
             display_base = dest_base if dest_base else root
             groups[m.dest.parent.relative_to(display_base).as_posix()].append(m)
 
-        print(
-            f"{'Moving' if args.apply else 'Would move'} {len(moves)} file(s) from {root}"
-        )
+        action_verb = "Copying" if args.copy else "Moving"
+        if not args.apply:
+            action_verb = "Would copy" if args.copy else "Would move"
+
+        print(f"{action_verb} {len(moves)} file(s) from {root}")
         if dest_base:
             print(f"Target destination: {dest_base}\n")
 
@@ -91,16 +93,19 @@ def cmd_organize(args) -> int:
 
     if not moves:
         return 0
+
     if not args.apply:
+        verb = "copied" if args.copy else "moved"
         print(
-            "\nDry run, nothing was moved. Re-run with --apply to do it. Undo anytime with: archivist undo"
+            f"\nDry run, nothing was {verb}. Re-run with --apply to do it. Undo anytime with: archivist undo"
         )
         return 0
 
-    done, errors = apply_moves(moves, root)
-    print(f"\nMoved {len(done)} file(s). Undo with: archivist undo")
+    done, errors = apply_moves(moves, root, is_copy=args.copy)
+    verb_done = "Copied" if args.copy else "Moved"
+    print(f"\n{verb_done} {len(done)} file(s). Undo with: archivist undo")
     for e in errors:
-        print(f"  could not move {e}", file=sys.stderr)
+        print(f"  could not process {e}", file=sys.stderr)
     return 1 if errors else 0
 
 
@@ -133,6 +138,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--apply",
         action="store_true",
         help="actually move files (otherwise preview only)",
+    )
+    o.add_argument(
+        "--copy", action="store_true", help="copy files instead of moving them"
     )
     o.add_argument(
         "--recursive",
